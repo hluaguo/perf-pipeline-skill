@@ -1,216 +1,336 @@
----
-name: perf-pipeline
-description: Multi-agent performance optimization pipeline. Use ONLY when the user asks to optimize performance, profile code, find bottlenecks, or run a performance audit across a codebase. Decomposes the project into modules, launches subagents per module to find all optimizations, collates and ranks candidates, validates the top 1-3, and submits PR-ready branches. Not for general refactoring, feature work, or debugging.
----
-
 # Performance Optimization Pipeline
 
-You are the orchestrator. You never edit code directly. You decompose, launch
-subagents, collate results, validate, and submit. Subagents do all the reading,
-benchmarking, and code changes.
+You are the orchestrator. You never edit code directly. You decompose the
+codebase, launch subagents, collate results, validate findings, and submit
+PRs. Subagents do all code reading, benchmarking, and editing.
 
-## Branch rules (non-negotiable)
+---
+
+## Branch rules
 
 ```
-main                          Orchestrator reads tree here. Source of truth.
+main                              Source of truth. Read tree here.
  |
- |--- opt/<module>-deep       One per subagent. Created from main. Never shared.
+ |--- opt/<module>-deep           One per subagent. Created from main. Never shared.
  |
- |--- validate/<fix-slug>     One per top candidate. Created from main.
- |                            NEVER branch from opt/* — they carry unrelated diffs.
- |                            Push validate/* directly to fork for PR. No merge branches.
+ |--- validate/<fix-slug>         One per top candidate. Created from main.
+ |                                NEVER branch from opt/* — they carry unrelated diffs.
+ |                                Push validate/* directly for PR. No merge branches.
 
- TEMP: /var/folders/.../T/opencode/<fix-slug>/ for all throwaway artifacts.
-       bench.swift, smoke.swift, report.md. Never committed. Delete after submit.
+ TEMP: /tmp/<fix-slug>/ for all throwaway artifacts (benchmark scripts, smoke tests,
+       notes). Never committed. Delete after successful submission.
 ```
+
+---
 
 ## Phase 1: ARCHITECT
 
-Read `Sources/` and decompose into modules. One module = one build target
-(has its own `Sources/<Name>/` and `Tests/<Name>Tests/`), ≤ ~20 files.
+Read the top-level source tree. Decompose into **modules**. One module is a
+self-contained unit: it compiles and tests independently, contains ≤ ~20
+files, and maps to one coherent concern (a library, a service, a layer, a
+build target).
 
 ```
-Output: module list with source paths and hot-path notes.
-
-  Module:   ContainerXPC
-  Target:   ContainerXPC
-  Tests:    ContainerXPCTests
-  Files:    Sources/ContainerXPC/XPCMessage.swift (every CLI command)
-            Sources/ContainerXPC/XPCServer.swift  (daemon lifecycle)
-            ...
+Output per module:
+  - Name, source directory, test directory
+  - Build command:  <build-tool> build --scope <module>
+  - Test command:   <build-tool> test --scope <module>
+  - Hot-path notes: which files run on every request / command / event loop
 ```
 
-Present the module list to the user for approval before launching subagents.
+Present modules to the user. Confirm before launching subagents.
+
+---
 
 ## Phase 2: INVESTIGATE
 
-For each module, launch ONE `general` subagent:
+For each module, launch **one subagent**. Give it:
 
 ```
-Task:        Read every file in module <name>. Find ALL performance issues.
-             Measure before/after for each. Report all findings (valid + invalid).
-Branch:      opt/<module>-deep (create from main)
-Return:      Structured report per module.
+Module:     <name>
+Files:      <list of every source file in the module>
+Branch:     opt/<module>-deep  (create from main)
 
-Agent prompt MUST include:
+Task:
+  1. Read every file in the module.
+  2. Scan for these patterns in every file:
 
-  "You are investigating <Module> at Sources/<Module>/*.swift.
-   Branch: opt/<module>-deep from main.
+     PATTERN               SIGNAL
+     ───────               ──────
+     lock contention       Lock/mutex/semaphore/queue.sync on a hot path
+     repeated computation  Expensive call as default parameter or inside a loop
+     existential overhead  Interface/trait/protocol with ≤ 3 implementors used as
+                            array element or polymorphic parameter
+     allocation churn      .append/.push in a loop without reserveCapacity/preallocation,
+                            string concatenation in a tight loop
+     deferred work         Eager init of heavy objects that could be lazy/static/singleton
+     retain cycles/leaks   Strong-capture closure where the capturer owns the closure
+     string interpolation  String building with expensive sub-expressions inside a hot loop
+     reusable encoder      Serializer/deserializer created per call instead of cached
 
-   Read every file. For each file scan these patterns:
+  3. For each pattern found:
+     - Write a standalone micro-benchmark. Measure BEFORE (on main) and AFTER (on opt/*).
+     - Estimate lines changed for a minimal fix.
+     - Mark valid: true if improvement > 10% AND estimated change < 50 lines.
+     - Mark valid: false otherwise (note why — too large, no gain, unsafe, etc.).
 
-   PATTERN              SIGNAL
-   lock contention      NSLock, os_unfair_lock, DispatchQueue.sync on hot paths
-   repeated computation ProcessInfo.environment, Date(), UUID() as default params or in loops
-   existential overhead protocol with ≤3 conformances used as [Protocol] or : Protocol
-   allocation churn     .append() in loop without reserveCapacity, String += in hot paths
-   deferred work        Logger() init, heavy setup in init() that could be lazy/static
-   retain cycles        { [self] in ... } escaping closure where self owns the closure
-   string interpolation "\\(expensive)" in tight loops
-   JSON/codable cache   JSONEncoder()/JSONDecoder() created per call instead of reused
+  4. Return a structured report for the orchestrator:
 
-   For each hit:
-   - Write a micro-benchmark (XCTest measureMetrics), measure old vs new
-   - Estimate lines changed for the fix
-   - Mark valid: true if improvement >10% AND lines <50, else valid: false
+     {
+       module: "<name>",
+       branch: "opt/<module>-deep",
+       files_read: N,
+       findings: [
+         {
+           pattern: "<one of the patterns above>",
+           location: "<file>:<line> — <function/symbol name>",
+           description: "<one-line description of what is slow and why>",
+           fix_lines: ±N,
+           before: "<mean> ± <stddev> (<n> runs)",
+           after:  "<mean> ± <stddev> (<n> runs)",
+           delta:  "-XX% (p < 0.0X)",
+           valid: true | false,
+           risk: "<what could break — threading, API, memory, semantics>"
+         },
+         ...
+       ]
+     }
 
-   Return structured JSON report:
-   {
-     module: "<name>",
-     branch: "opt/<module>-deep",
-     files_read: N,
-     findings: [
-       {
-         pattern: "...",
-         location: "File.swift:line",
-         description: "...",
-         fix_lines: ±N,
-         before: "mean X us, stddev Y us, n=Z",
-         after: "mean X us, stddev Y us, n=Z",
-         delta: "-XX%",
-         valid: true|false,
-         risk: "what could break"
-       }, ...
-     ]
-   }"
-
-Launch all subagents in parallel. Wait for all to complete.
+Launch all subagents in parallel. Wait for all to finish before continuing.
 ```
+
+---
 
 ## Phase 3: COLLATE
 
-Collect all agent reports. Stay on `main`.
+Stay on `main`. Collect every agent's report.
 
 ```
-1. DEDUPLICATE — same fix in multiple modules? merge into one candidate.
-2. CLASSIFY    — group by pattern type (lock removal, enum conversion, caching, etc.)
-3. SCORE       — Score = delta_% / sqrt(|lines_changed|). Drop if valid:false or score < threshold.
-4. SELECT      — Top 1-3 by score.
+1. DEDUPLICATE  — Same fix appearing in multiple modules? Merge into one candidate.
 
-Present the top candidates to the user with scores and rationale.
-Ask which to validate (or validate all top 3).
+2. CLASSIFY     — Group by pattern type:
+                   lock-removal, enum-conversion, capacity-hints, caching,
+                   retain-cycle, loop-hoisting, deferred-init, encoder-reuse.
+
+3. SCORE        — Score = delta_percent / sqrt(|lines_changed|).
+                  Drop candidates where: valid = false, score below threshold,
+                  or fix touches > 5 files across > 2 modules (architectural —
+                  needs a separate, deeper process).
+
+4. SELECT       — Top 1–3 by score. Present to user with scores and rationale.
+                  Ask which to proceed with (or validate all).
 ```
+
+---
 
 ## Phase 4: VALIDATE
 
-For each selected candidate, run the five-stage gate. Use `task` subagents for
-each validation — they can run in parallel.
+For each selected candidate, run the five-stage gate. Use subagents for each
+validation — they can run in parallel across candidates.
 
 ```
-Branch: validate/<fix-slug>  (MUST be created from main, NEVER from opt/*)
-
-4a. ISOLATE   — Apply only the semantic change. Strip profilers, debug prints, comments.
-                Gate: diff < 200 lines, < 5 files.
-
-                Temp dir: /var/folders/.../T/opencode/<fix-slug>/
-                All benchmarks, smoke tests, notes go there. Never committed.
-
-4b. CORRECT   — swift build --target <Module>, swift test, release build, zero warnings.
-                Pure function? → A/B smoke test: 100 random inputs, assert identical.
-                Stateful change? → Test cold start and warm path separately.
-                API changed? → grep ALL callers, fix every one, build every target.
-                Lock removed? → Trace ownership, cite serialization guarantee.
-
-4c. MEASURE   — Micro-benchmark in release mode, ≥10 iterations.
-                Compare: (old-mean − new-mean) / old-stddev > 2 → significant.
-                Report: before ± σ, after ± σ, delta%, p-value.
-                FAIL if regression or p > 0.05. WARN if delta < 10% or σ > 30%.
-
-4d. SAFETY    — Thread: cite source for every lock removal (man page, class doc).
-                Memory: no new retain cycles, no unbounded caches, no UAF.
-                Errors: propagation unchanged, no swallowed errors.
-                API: internal = safe. Public = additive only, or document breaking change.
-
-4e. SCOPE     — grep -r changed_symbol → list all callers.
-                Build and test every caller's target.
-                Categorize: same module (low), other internal (medium), public (high).
-                WARN if any caller has zero test coverage.
-
-Decision matrix:
-  PASS:  4b✓ 4c✓ 4d✓ 4e✓  → AUDIT
-  PASS:  4b✓ 4c⚠ 4d✓ 4e✓  → AUDIT (note weak delta)
-  PASS:  4b✓ 4c✓ 4d✓ 4e⚠  → AUDIT (note coverage gap)
-  FAIL:  any ✗              → Drop candidate
+Branch: validate/<fix-slug>    (MUST be created from main. NEVER from opt/*.)
+Temp:   /tmp/<fix-slug>/        All throwaway files go here. Never committed.
 ```
+
+### 4a. ISOLATE
+
+```
+Apply ONLY the semantic change to the validate branch. Remove:
+  - Profiling timers, benchmark harness code, debug prints
+  - Comments explaining the change (keepers go in commit messages)
+  - Whitespace-only formatting
+
+Verify: diff from main is < 200 lines, touches < 5 files.
+Commit:  <type>(<scope>): <imperative summary>
+
+         Before: <baseline>
+         After:  <result>
+         How:    <mechanical description of the change>
+```
+
+### 4b. CORRECTNESS — prove identical output
+
+```
+□ Build (debug and release) — target scope and full project
+□ Test (module and full suite)
+□ Zero new warnings
+
+□ Pure-function change → Write an A/B smoke test:
+  Generate 100 random inputs. Run old code and new code. Assert identical outputs.
+
+□ Stateful change (static/lazy/cache) → Test cold start AND warm path separately.
+  Test reset/re-init if applicable.
+
+□ API surface changed → grep every caller across the entire codebase. Fix all.
+  Build and test every affected target.
+
+□ Lock/queue removed → Trace object ownership. Prove serialization:
+  - Single-threaded access? OR externally serialized by contract?
+  - Cite the guarantee: man page, language spec, framework doc, dispatch contract.
+
+□ Data type changed (interface→enum, struct→class) → Verify:
+  equality, hashing, serialization round-trip, iteration order, thread-safety.
+
+FAIL if any check fails.
+```
+
+### 4c. MEASURE — confirm improvement is real
+
+```
+□ Use release builds only (debug assertions skew results).
+
+□ Micro-benchmark the isolated function:
+  ≥ 10 iterations. Compute mean and stddev.
+  Compare: (old_mean − new_mean) / old_stddev > 2 → statistically significant.
+
+□ End-to-end benchmark (if micro is inconclusive):
+  Time the user-facing command that exercises this path. Warmup + ≥ 20 runs.
+  hyperfine --warmup 5 --runs 20 '<command>'
+
+□ Cold-start benchmark (caching changes only):
+  Flush relevant caches between runs. Measure first-call latency.
+
+Report:
+  Before:  12.3 µs ± 1.1 µs (50 runs)
+  After:    4.7 µs ± 0.8 µs (50 runs)
+  Delta:   −61.8% (p < 0.01)
+
+WARN if delta < 10% or stddev > 30% of the mean.
+FAIL if negative delta (regression) or p > 0.05.
+```
+
+### 4d. SAFETY — no hidden hazards
+
+```
+Thread safety:
+□ Every lock/queue removal backed by a cited serialization guarantee.
+  Examples:
+    - POSIX: "All connection activity happens on an internal queue" (man page section)
+    - Platform: main-thread-only by documented contract
+    - Runtime: actor-serialized, run-loop-serialized, single-owner by construction
+□ New shared mutable state? Must have clear protection (lock, actor, atomic, read-only).
+□ No path accesses a resource outside the serial context.
+
+Memory safety:
+□ No new retain cycles / reference cycles.
+□ No unbounded growth: caches have eviction or fixed capacity.
+  Static singletons don't hold large objects for the full process lifetime.
+□ No use-after-free / double-free. Unsafe pointer lifetimes unchanged.
+
+Error handling:
+□ Error propagation paths identical (throw, return null, panic unchanged).
+□ No silently swallowed errors.
+□ Optional/Maybe semantics preserved.
+
+API compatibility:
+□ Internal / private → safe.
+□ Public / exported → additive changes only (new variant, new default).
+  Removals or reorderings → document as breaking change with SemVer impact.
+
+FAIL if serialization guarantee cannot be cited from an authoritative source.
+FAIL if new mutable shared state has no protection.
+FAIL if public API broken without documented justification.
+```
+
+### 4e. SCOPE — blast radius
+
+```
+□ grep the changed symbol across the entire codebase (sources + tests).
+□ Build and test every calling target.
+□ Categorize each caller:
+  Same module  |  Internal caller (other module)  |  External/public API consumer
+  ─────────────│──────────────────────────────────│──────────────────────────────
+  Low risk     |  Medium risk (verify build)      |  High risk (must document)
+
+□ Map test coverage per caller:
+  Directly tested (strong)  |  Indirectly tested via caller (acceptable)  |  Untested (weak — flag in PR)
+
+WARN if any caller has zero test coverage.
+FAIL if any external caller breaks and is missed.
+```
+
+### Decision matrix
+
+```
+  4b (correct)   4c (faster)   4d (safe)   4e (bounded)   →  Verdict
+  ────────────   ───────────   ─────────   ───────────
+      ✓              ✓            ✓            ✓          →  PASS → AUDIT
+      ✓              ⚠            ✓            ✓          →  PASS → AUDIT (note weak delta)
+      ✓              ✓            ✓            ⚠          →  PASS → AUDIT (note coverage gap)
+      ✗              -            -            -          →  DROP
+      ✓              ✗            -            -          →  DROP
+      ✓              ✓            ✗            -          →  DROP
+```
+
+---
 
 ## Phase 5: AUDIT
 
 Stay on `validate/<fix-slug>`.
 
 ```
-- swift test (full suite)
-- swift build (all targets)
-- swift build -c release
-- Final review: any leftover debug code? TODO/FIXME?
-- Every claim in PR body has inline source citation (man page section, URL, commit hash)
-- PR body is self-contained — maintainer needs no external docs
-- Squash fixups into single clean commit: git rebase -i main
+□ Full test suite against validate branch
+□ Full project build (debug + release)
+□ Final diff review: any leftover debug code, TODOs, stray comments?
+□ Every claim in the PR body has an inline citation:
+  - Man page:  "xpc_connection_create(3) states: ..."
+  - Language spec: "Swift evaluates default parameter expressions at the call site."
+  - Framework doc: URL or class-doc reference
+  - Compiler output: godbolt.org link or assembly snippet
+□ PR body is self-contained. A maintainer needs zero external documents to
+  understand and approve this change.
+□ Squash fixups into a single clean commit:
+  git rebase -i main
 ```
+
+---
 
 ## Phase 6: SUBMIT
 
 ```
-git push fork validate/<fix-slug>
-→ Open PR to upstream main
+Push validate/<fix-slug> to the fork. Open a PR to upstream main.
 
 PR body template:
+──────────────────────────────────────
+## Type of Change
+- [x] Bug fix (performance)
 
-  ## Type of Change
-  - [x] Bug fix (performance)
+## Motivation
+[What runs slowly and why. Include inline citation from official source.]
 
-  ## Motivation
-  [What runs slowly and why. Inline source citation from official docs.]
+## Changes
+- File1.swift: One-line description of the change
+- File2.swift: One-line description of the change
 
-  ## Changes
-  - File1.swift: [one-line description]
-  - File2.swift: [one-line description]
+## Testing
+- [x] Build (debug + release)
+- [x] Full test suite (N tests pass)
+- [x] Zero warnings
+──────────────────────────────────────
 
-  ## Testing
-  - [x] swift build (all targets)
-  - [x] swift test (N tests pass)
-  - [x] Zero warnings
-  - [x] Release build succeeds
-
-Delete /tmp/opencode/<fix-slug>/ after submission.
+After submission, delete /tmp/<fix-slug>/.
 ```
+
+---
 
 ## Rules summary
 
 | Rule | Reason |
 |------|--------|
-| One module per subagent | Deep focus, no cross-contamination |
-| Module ≤ ~20 files | Subagent can read everything |
-| Branch: opt/<module>-deep from main | Isolated workspace per agent |
-| Subagent reports ALL findings (valid + invalid) | Invalid teaches pattern boundaries |
-| Orchestrator on main | Clean comparison baseline |
-| Score = Δ% / √lines | Reward small, high-impact diffs |
-| Drop >5 file, >2 module changes | Architectural = separate process |
-| Branch: validate/<fix-slug> from main | NEVER from opt/* |
-| /tmp for all validation artifacts | Cannot leak into repo; self-documents as throwaway |
-| Strip profiling artifacts from branch | Debug harness doesn't belong upstream |
-| Release build only for measurement | Debug assertions skew results |
-| Cite source for every lock removal | man page, class doc, or dispatch contract |
-| grep + build every caller | Catch breakage before PR |
-| PR body self-contained with inline citations | Maintainer needs no external docs |
-| Push validate/<fix-slug> directly | Single clean commit, no merge branches |
-| Delete /tmp artifacts after submit | No stale files |
+| One module per subagent | Focused investigation. No cross-contamination. |
+| Module ≤ ~20 files | Subagent can read and understand everything. |
+| Branch: opt/<module>-deep from main | Isolated workspace. Agents never share branches. |
+| Subagent reports ALL findings | Invalid ones teach the orchestrator what patterns don't apply. |
+| Orchestrator stays on main during COLLATE | Clean baseline. No agent diffs leak in. |
+| Score = Δ% / √│lines│ | Rewards small, high-impact changes. |
+| Drop >5 files, >2 modules | Architectural changes need a separate, slower process. |
+| validate/* branched from main ONLY | opt/* branches accumulate unrelated changes. |
+| /tmp for all validation artifacts | Cannot leak into repo. Self-documents as throwaway. |
+| Strip profilers before commit | Debug harness does not belong in production or PRs. |
+| Release-build benchmarks only | Debug assertions, bounds checks, and sanitizers distort timing. |
+| Cite authoritative source for every lock removal | Man page, language spec, framework docs — not vibes. |
+| grep + build + test every caller | Catch breakage before the PR is opened. |
+| PR body self-contained with inline citations | Maintainer reads one page, gets the full picture. |
+| Push validate/* directly (no merge branch) | One clean commit, no internal history noise. |
+| Delete /tmp after submission | No stale artifacts. |
