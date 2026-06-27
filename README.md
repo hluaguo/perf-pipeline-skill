@@ -27,22 +27,20 @@ skills/
 
 ## Installation
 
-To load these skills into your coding agent workspace, clone this repository into your customizations root:
+The easiest way to install these skills is to run the automated installation script. 
 
-### For OpenCode / Gemini Customizations
-Clone directly into your global configs:
+### Quick Install (via curl)
+Run this command in your terminal to automatically clone and install the skills to your active agent environments (e.g. OpenCode, Claude Code, Gemini CLI, or locally to your active project workspace):
 ```bash
-git clone https://github.com/hluaguo/perf-pipeline-skill.git ~/.config/opencode/
-```
-Or place the subdirectories inside your active workspace's `.agents/skills/` folder:
-```
-<workspace-root>/.agents/skills/perf-pipeline/
-<workspace-root>/.agents/skills/perf-review/
+curl -fsSL https://raw.githubusercontent.com/hluaguo/perf-pipeline-skill/main/install.sh | bash
 ```
 
-### For Claude Code / Codex
+### Manual Install
+If you prefer to install manually, clone the repository and run the installer locally:
 ```bash
-git clone https://github.com/hluaguo/perf-pipeline-skill.git ~/.claude/skills/perf-pipeline
+git clone https://github.com/hluaguo/perf-pipeline-skill.git
+cd perf-pipeline-skill
+./install.sh
 ```
 
 ---
