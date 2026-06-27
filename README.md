@@ -1,90 +1,74 @@
-# perf-pipeline
+# Performance Optimization & Review Skills
 
-A language-agnostic, multi-agent performance optimization pipeline. An
-orchestrator decomposes a codebase into modules, launches one subagent per
-module to find every performance issue, collates and ranks candidates,
-validates the top 1-3 through a five-stage correctness/safety/scope gate,
-and produces PR-ready branches with inline citations from official sources.
+A suite of language-agnostic, agentic tools for automated performance auditing, optimization, and code review.
 
 ```
-ARCHITECT  ──>  INVESTIGATE  ──>  COLLATE  ──>  VALIDATE  ──>  AUDIT  ──>  SUBMIT
-   (1)          (N agents)        (1)          (top 3)        (1)        (1)
+ARCHITECT ──> INVESTIGATE ──> COLLATE ──> VALIDATE ──> AUDIT & REVIEW ──> SUBMIT
 ```
 
-## Use with any LLM orchestrator
+This repository contains two core skills:
 
-Copy the contents of `SKILL.md` into the system prompt or agent instructions
-of an LLM that can spawn subagents. The orchestrator reads the codebase tree,
-delegates investigation to subagents, and follows the validation gates before
-submitting.
+1. **`perf-pipeline`**: The orchestrator skill that decomposes a codebase, investigates bottlenecks, runs isolated micro-benchmarks, and validates candidates through correctness/safety gates.
+2. **`perf-review`**: The companion auditing skill that reviews performance optimization PRs or branches (`validate/*`) for safety, math correctness, race conditions, memory bounds, and benchmark integrity before merging.
 
-Works with any language, build system, and VCS — the pipeline only assumes:
+---
 
-- A source tree decomposable into independently buildable modules (≤ ~20 files each)
-- A build command per module
-- A test command per module
-- A version control system with branches
+## Skills Directory Structure
 
-## Install as an opencode skill
+```
+skills/
+├── perf-pipeline/
+│   └── SKILL.md      # Orchestration, Benchmarking & Safety gates
+└── perf-review/
+    └── SKILL.md      # PR auditing, algebraic math checks & GPU sync review
+```
 
+---
+
+## Installation
+
+To load these skills into your coding agent workspace, clone this repository into your customizations root:
+
+### For OpenCode / Gemini Customizations
+Clone directly into your global configs:
 ```bash
-git clone https://github.com/hluaguo/perf-pipeline-skill.git \
-  ~/.config/opencode/skills/perf-pipeline
+git clone https://github.com/hluaguo/perf-pipeline-skill.git ~/.config/opencode/
+```
+Or place the subdirectories inside your active workspace's `.agents/skills/` folder:
+```
+<workspace-root>/.agents/skills/perf-pipeline/
+<workspace-root>/.agents/skills/perf-review/
 ```
 
-Restart opencode. The skill triggers when you ask to "optimize performance",
-"profile the codebase", "find bottlenecks", or "run a performance audit".
-
-## Install as a Claude Code / Codex skill
-
+### For Claude Code / Codex
 ```bash
-git clone https://github.com/hluaguo/perf-pipeline-skill.git \
-  ~/.claude/skills/perf-pipeline
+git clone https://github.com/hluaguo/perf-pipeline-skill.git ~/.claude/skills/perf-pipeline
 ```
 
-## Phases
+---
 
-### 1. ARCHITECT
-Read the source tree. Split into modules (build targets, ≤ ~20 files each).
-Present the decomposition to the user.
+## Skill Descriptions
 
-### 2. INVESTIGATE
-Launch one subagent per module on its own branch (`opt/<module>-deep`).
-Each subagent reads every file, flags 8 known performance patterns, benchmarks
-before/after, and returns a structured report of all findings (valid + invalid).
+### 1. `perf-pipeline`
+* **Trigger words**: `optimize performance`, `profile the codebase`, `find bottlenecks`, `run a performance audit`
+* **Workflow**:
+  * **Architect**: Splitting the codebase into buildable targets.
+  * **Investigate**: Scanning for 12 known patterns (lock contention, allocation churn, device-host sync barriers, JIT compiler churn, etc.).
+  * **Collate**: Deduplicating and ranking using the Risk-Adjusted Scoring formula:
+    $$\text{Score} = \left(\frac{\Delta\%}{\sqrt{|\text{lines\_changed}|}}\right) \times \text{RiskMultiplier}$$
+  * **Validate**: Running correctness and performance gates (e.g. differential testing with $\ge$ 1,000 edge-case inputs).
 
-### 3. COLLATE
-Merge reports, deduplicate, classify by pattern, score by
-`delta_percent / sqrt(|lines_changed|)`, and select the top 1-3 candidates.
+### 2. `perf-review`
+* **Trigger words**: `review performance PR`, `audit optimization branch`, `validate merge safety`
+* **Workflow**:
+  * **Isolate Diff**: Ensuring functional changes are $\le$ 200 lines and $\le$ 5 files.
+  * **Semantics**: Catching silent error swallowing or optionality failures.
+  * **Safety**: Verifying concurrency locks, weak reference loops, and cache eviction boundaries (to prevent OOMs).
+  * **Hardware**: Spotting device-to-host readback bottlenecks and shader compile loops.
+  * **Math**: Reviewing strength reductions and fast-math approximations.
+  * **Benchmarks**: Checking compilation warmup runs and device queue synchronization.
 
-### 4. VALIDATE
-Five-stage gate per candidate (on `validate/<fix-slug>` from `main`):
-
-| Stage | Question |
-|-------|----------|
-| 4a. ISOLATE | Is the diff clean and minimal? (< 200 lines, < 5 files) |
-| 4b. CORRECT | Does optimized code produce identical output? |
-| 4c. MEASURE | Is the improvement real and statistically significant? |
-| 4d. SAFETY | Thread safety, memory, errors, API — any hidden hazards? |
-| 4e. SCOPE | Do all callers still build, test, and behave correctly? |
-
-Decision: PASS (proceed), WARN (proceed with caveat), or DROP.
-
-### 5. AUDIT
-Full regression suite. Every claim in the PR body backed by an inline citation
-from an authoritative source (man page, language spec, framework docs).
-
-### 6. SUBMIT
-Push the validated branch. Open a self-contained PR.
-
-## Rules
-
-- One module per subagent — never share branches
-- All throwaway artifacts to `/tmp/<fix-slug>/` — never committed
-- Never validate on investigation branches — always branch from `main`
-- Release-build benchmarks only
-- Cite an authoritative source for every lock removal
-- PR body must be self-contained — the maintainer reads one page
+---
 
 ## License
 
