@@ -67,6 +67,14 @@ Task:
      retain cycles/leaks   Strong-capture closure where the capturer owns the closure
      string interpolation  String building with expensive sub-expressions inside a hot loop
      reusable encoder      Serializer/deserializer created per call instead of cached
+     GPU-CPU sync barrier  Calling .item(), .tolist(), or .numpy() inside a hot loop or
+                            repeatedly on small tensors/arrays, causing blocking CPU stalls
+     graph compiler churn  Wrapping basic CPU-native/scalar operations in GPU arrays (MLX/PyTorch),
+                            causing constant compilation/graph execution overhead
+     static recreation     Re-computing static window functions, mel filters, or lookup tables
+                            in the inference path instead of pre-computing or caching them
+     missing compilation   Pure functional math/array code running repeatedly without compiler
+                            transforms like @mx.compile or torch.compile where applicable
 
   3. For each pattern found:
      - Write a standalone micro-benchmark. Measure BEFORE (on main) and AFTER (on opt/*).
@@ -179,6 +187,11 @@ FAIL if any check fails.
 
 ```
 □ Use release builds only (debug assertions skew results).
+
+□ ML/GPU workloads: Warm up the pipeline (run 5–10 iterations) before starting the timer
+  to eliminate compilation/trace overhead from the measurements.
+□ ML/GPU workloads: Call explicit synchronization (e.g., mx.synchronize() or torch.cuda.synchronize())
+  before stopping the timer to ensure you measure actual execution time rather than just graph construction.
 
 □ Micro-benchmark the isolated function:
   ≥ 10 iterations. Compute mean and stddev.
