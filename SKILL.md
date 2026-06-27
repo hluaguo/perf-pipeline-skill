@@ -125,7 +125,12 @@ Stay on `main`. Collect every agent's report.
                    lock-removal, enum-conversion, capacity-hints, caching,
                    retain-cycle, loop-hoisting, deferred-init, encoder-reuse.
 
-3. SCORE        — Score = delta_percent / sqrt(|lines_changed|).
+3. SCORE        — Score = (delta_percent / sqrt(|lines_changed|)) * RiskMultiplier
+                  Where RiskMultiplier is:
+                    - 1.0 (Negligible Risk): Pure mathematical/compiler optimizations, dead code removal.
+                    - 0.8 (Low Risk): Hoisting loops, static caches (lru_cache), local variables.
+                    - 0.5 (Medium Risk): Internal data structure changes, refactoring algorithms.
+                    - 0.1 (High Risk): Removing locks/queues (concurrency), unsafe memory pointers, API-breaking changes.
                   Drop candidates where: valid = false, score below threshold,
                   or fix touches > 5 files across > 2 modules (architectural —
                   needs a separate, deeper process).
@@ -169,8 +174,10 @@ Commit:  <type>(<scope>): <imperative summary>
 □ Test (module and full suite)
 □ Zero new warnings
 
-□ Pure-function change → Write an A/B smoke test:
-  Generate 100 random inputs. Run old code and new code. Assert identical outputs.
+□ Pure-function/Mathematical changes → Differential/Property-based Testing:
+  Generate 1,000+ inputs spanning standard ranges AND extreme edge cases (empty strings/arrays, zeros,
+  negatives, overflow boundaries, floating-point NaN/Inf/denormals). Run old and new code, asserting
+  identical outputs (within a strict numerical tolerance for floating-point changes).
 
 □ Stateful change (static/lazy/cache) → Test cold start AND warm path separately.
   Test reset/re-init if applicable.
