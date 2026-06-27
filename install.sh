@@ -20,19 +20,41 @@ echo -e "${CYAN}${BOLD}     Performance Optimization & Auditor Skills      ${NC}
 echo -e "${BLUE}${BOLD}====================================================${NC}"
 echo ""
 
-# Find where the script is running from
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_SKILLS_DIR="${SCRIPT_DIR}/skills"
+# Setup temp directory cleanup
+TEMP_DIR=""
+cleanup() {
+  if [ -n "${TEMP_DIR}" ] && [ -d "${TEMP_DIR}" ]; then
+    rm -rf "${TEMP_DIR}"
+  fi
+}
+trap cleanup EXIT
+
+# Detect if running via curl/pipe (meaning no local script file)
+RUNNING_VIA_CURL=0
+if [ -z "${BASH_SOURCE[0]:-}" ]; then
+  RUNNING_VIA_CURL=1
+fi
+
+if [ "${RUNNING_VIA_CURL}" -eq 1 ]; then
+  echo -e "Running remote installer. Downloading latest skills from GitHub..."
+  TEMP_DIR="$(mktemp -d)"
+  if ! git clone --depth 1 https://github.com/hluaguo/perf-pipeline-skill.git "${TEMP_DIR}" > /dev/null 2>&1; then
+    echo -e "${RED}Error: Failed to download repository from GitHub. Make sure you have git installed.${NC}"
+    exit 1
+  fi
+  REPO_SKILLS_DIR="${TEMP_DIR}/skills"
+else
+  # Running locally
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  REPO_SKILLS_DIR="${SCRIPT_DIR}/skills"
+fi
 
 # Check if skills directory exists
 if [ ! -d "${REPO_SKILLS_DIR}" ]; then
   echo -e "${RED}Error: Cannot find 'skills' folder at ${REPO_SKILLS_DIR}.${NC}"
-  echo -e "Make sure you are running this installer inside the cloned repository."
+  echo -e "Make sure you are running this installer inside the cloned repository or have an active internet connection."
   exit 1
 fi
-
-echo -e "Detected source skills at: ${YELLOW}${REPO_SKILLS_DIR}${NC}"
-echo ""
 
 # Function to install skills to a specific target
 install_to_path() {
@@ -61,7 +83,7 @@ INSTALLED=0
 OPENCODE_DIR="${HOME}/.config/opencode/skills"
 GEMINI_DIR="${HOME}/.gemini/config/skills"
 
-# Check and install to OpenCode
+# Check and install to OpenCode / Gemini
 if [ -d "${HOME}/.config/opencode" ] || [ -d "${HOME}/.gemini" ]; then
   if [ -d "${HOME}/.config/opencode" ]; then
     install_to_path "${OPENCODE_DIR}" "OpenCode Global Customizations"
@@ -88,7 +110,7 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo ""
   read -p "Would you like to install these skills locally inside this Git project? (y/n): " -n 1 -r
   echo ""
-  if [[ $REPLY =~ ^[Yy]$ ]]; then
+  if [[ ${REPLY:-} =~ ^[Yy]$ ]]; then
     install_to_path "${LOCAL_AGENTS_DIR}" "Local Project (.agents)"
     INSTALLED=1
   fi
@@ -99,7 +121,7 @@ if [ "${INSTALLED}" -eq 0 ]; then
   echo -e "Please run this script inside a Git project to install locally, or specify a custom folder below."
   echo ""
   read -p "Enter custom path to install skills folder (e.g. ./skills): " CUSTOM_PATH
-  if [ -n "${CUSTOM_PATH}" ]; then
+  if [ -n "${CUSTOM_PATH:-}" ]; then
     install_to_path "${CUSTOM_PATH}" "Custom Directory"
     INSTALLED=1
   fi
