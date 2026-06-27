@@ -67,14 +67,19 @@ Task:
      retain cycles/leaks   Strong-capture closure where the capturer owns the closure
      string interpolation  String building with expensive sub-expressions inside a hot loop
      reusable encoder      Serializer/deserializer created per call instead of cached
-     GPU-CPU sync barrier  Calling .item(), .tolist(), or .numpy() inside a hot loop or
-                            repeatedly on small tensors/arrays, causing blocking CPU stalls
-     graph compiler churn  Wrapping basic CPU-native/scalar operations in GPU arrays (MLX/PyTorch),
-                            causing constant compilation/graph execution overhead
-     static recreation     Re-computing static window functions, mel filters, or lookup tables
-                            in the inference path instead of pre-computing or caching them
-     missing compilation   Pure functional math/array code running repeatedly without compiler
-                            transforms like @mx.compile or torch.compile where applicable
+     device-host barrier   Implicit/explicit device-to-host readbacks, syncs, or copies (e.g. .item(),
+                            .numpy(), cudaMemcpy, glReadPixels, glGetBufferSubData) in hot loops
+     compiler/JIT churn    Re-compilation, graph building, or wrapper allocation (like wrapping scalar
+                            operations in GPU arrays/tensors) inside tight loops instead of caching compiles
+     invariant recreation  Re-allocating/re-computing invariant matrices, lookup tables, filters,
+                            or constants in hot paths instead of pre-computing or hoisting them
+     strength reduction    Using computationally expensive math operations where cheaper alternatives exist
+                            (e.g., division/modulo instead of bitwise ops, pow(x,2) instead of x*x,
+                            nested floor/rounding graphs instead of closed-form integer division)
+     approximate math      Using exact calculations where cheaper fast-math approximations (e.g., rsqrt,
+                            approximate logs/trig, lower precision, lookup tables) are acceptable
+     simd/vectorization    Serial/element-wise CPU math loops that prevent auto-vectorization, or using serial
+                            loops instead of vectorized/tensor CPU/GPU instructions
 
   3. For each pattern found:
      - Write a standalone micro-benchmark. Measure BEFORE (on main) and AFTER (on opt/*).
@@ -188,10 +193,11 @@ FAIL if any check fails.
 ```
 □ Use release builds only (debug assertions skew results).
 
-□ ML/GPU workloads: Warm up the pipeline (run 5–10 iterations) before starting the timer
-  to eliminate compilation/trace overhead from the measurements.
-□ ML/GPU workloads: Call explicit synchronization (e.g., mx.synchronize() or torch.cuda.synchronize())
-  before stopping the timer to ensure you measure actual execution time rather than just graph construction.
+□ JIT/Warmup platforms (JVM, V8, PyTorch, MLX, WebGL/WebGPU shaders): Warm up the execution
+  pipeline (run 5–10 iterations) before starting the timer to eliminate JIT compilation or trace overhead.
+□ Asynchronous / Hardware-accelerated pipelines (GPU, CUDA, OpenCL, Metal, Vulkan, command queues):
+  Call explicit device/queue synchronization (e.g. mx.synchronize(), cudaDeviceSynchronize(),
+  command-buffer wait) before stopping the timer to measure actual execution time instead of CPU dispatch latency.
 
 □ Micro-benchmark the isolated function:
   ≥ 10 iterations. Compute mean and stddev.
