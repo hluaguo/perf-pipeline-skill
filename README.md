@@ -20,28 +20,6 @@ npx skills add hluaguo/perf-pipeline-skill
 npx skills add hluaguo/perf-pipeline-skill -g
 ```
 
-### Automated Script (via curl)
-Alternatively, run the interactive installer in your terminal:
-```bash
-curl -fsSL https://raw.githubusercontent.com/hluaguo/perf-pipeline-skill/main/install.sh | bash
-```
-
-### Unattended / Scripted Install
-Specify options to bypass interactive prompts when using the automated script:
-```bash
-# Examples:
-curl -fsSL https://raw.githubusercontent.com/hluaguo/perf-pipeline-skill/main/install.sh | bash -s -- --gemini    # Install to Gemini only
-curl -fsSL https://raw.githubusercontent.com/hluaguo/perf-pipeline-skill/main/install.sh | bash -s -- --project   # Install to local project
-curl -fsSL https://raw.githubusercontent.com/hluaguo/perf-pipeline-skill/main/install.sh | bash -s -- --all       # Install to all global + project
-```
-
-#### Available CLI Options:
-* `-g, --global` / `--gemini` / `--claude` / `--opencode`: Target specific global agent configurations.
-* `-p, --project`: Install to the current project's local directory (`.agents/skills`).
-* `-a, --all`: Install to both global environments and the local project.
-* `-d, --path PATH`: Install to a custom directory.
-* `-h, --help`: Show help instructions.
-
 ---
 
 ## Included Skills
