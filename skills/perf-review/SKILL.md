@@ -38,7 +38,12 @@ Ensure the optimized implementation behaves exactly like the baseline under all 
 * **Silent Errors**: Check if the optimization swallows errors or exceptions to save CPU cycles (e.g., catching exceptions and returning default values silently).
 * **Nullability / Optionality**: Verify that `null`, `nil`, `None`, or empty/missing value logic is handled identically.
 * **Edge-case inputs**: Check if the optimization fails on degenerate inputs (empty lists, empty strings, extremely large arrays).
-* **Differential Verification**: Confirm that the author has run differential testing (A/B testing with $\ge$ 1,000 inputs) comparing outputs of the old vs. new code.
+* **Differential Verification**: Confirm that the author has run differential testing comparing outputs of the old vs. new code:
+  - Lightweight functions: A/B testing with $\ge$ 1,000 inputs.
+  - Heavy ML/Inference workloads (e.g., PyTorch, MLX): Validate output tensor numerical equivalence (within tolerance ε) across representative input prompts and token sequence boundaries, rather than 1,000+ slow model runs.
+* **Deep Learning & LLM Invariants**:
+  - Assert logical equivalence of KV cache retention, mask computations, and token output distributions.
+  - Separately validate output parity for the Prefill Phase (context processing) and the Decode Phase (autoregressive generation loop).
 
 ---
 
@@ -84,9 +89,13 @@ Critique algebraic simplifications and math strength reductions:
 
 Critique the benchmarking process and statistics:
 * **Build Mode**: Ensure benchmarks were executed on optimized release builds (debug builds with assertions, sanitizers, or bounds checks distort timing analysis).
-* **Warmup**: Verify that 5–10 warmup runs were executed before measurements began to allow JIT compilers or caches to warm up.
-* **Async Synchronization**: For asynchronous hardware execution (GPUs), verify that explicit device sync commands were called before stopping the timer.
-* **Statistical Integrity**: Ensure the run size is sufficient ($\ge$ 10 iterations) and that the performance improvement ($\Delta\%$) is statistically significant relative to the standard deviation ($\sigma$).
+* **Warmup**: Verify that warmup runs (e.g., compiling shaders, JIT trace compilation, or initial tensor evaluation passes) were executed before measurements began to allow execution engines or caches to warm up.
+* **Async Synchronization**: For asynchronous hardware execution (GPUs), verify that explicit device sync commands (e.g., `mx.synchronize()`, `cudaDeviceSynchronize()`, or Metal commandBuffer wait) were called before stopping the timer to measure real execution time instead of CPU dispatch latency.
+* **LLM / Transformer-Specific Metrics**:
+  - Verify that the Prefill Phase (prompt token ingestion, KV cache allocation) and the Decode Phase (token generation loops) were profiled and reported separately.
+  - Verify TTFT (Time to First Token) and TPS (Tokens Per Second) metrics are collected.
+  - Check for KV cache memory footprint stability and memory fragmentation concerns.
+* **Statistical Integrity**: Ensure the run size is sufficient to achieve standard deviation convergence (e.g., $\ge$ 10 iterations for lightweight functions, or 5-10 sequences for heavy inference runs) and that the performance improvement ($\Delta\%$) is statistically significant relative to the standard deviation ($\sigma$).
 
 ---
 

@@ -166,9 +166,13 @@ Commit: <type>(<scope>): <imperative summary>
 □ Ensure compilation output generates zero new compiler warnings
 
 □ Pure-function/Mathematical modifications → Property-based Differential Testing:
-  Generate 1,000+ test inputs spanning standard ranges AND extreme edge cases (empty strings/arrays, zeros,
-  negatives, overflow boundaries, floating-point NaN/Inf/denormals). Execute baseline and optimized implementations,
-  asserting strict output equivalence (within numerical tolerance ε for floating-point changes).
+  - Lightweight functions: Generate 1,000+ test inputs spanning standard ranges and extreme edge cases.
+  - Heavy ML/Inference workloads (e.g., PyTorch, MLX): Validate output tensor numerical equivalence (within tolerance ε)
+    across representative input prompts and token sequence boundaries, rather than 1,000+ slow model runs.
+
+□ Deep Learning / LLM Workloads → Architectural & Phase Equivalence:
+  - Assert logical equivalence of KV cache retention, mask computations, and token output distributions.
+  - Separately validate output parity for the Prefill Phase (context processing) and the Decode Phase (autoregressive generation loop).
 
 □ Stateful optimizations (static/lazy/cache) → Verify cold start AND warm path execution states independently.
   Test cache reset/re-initialization mechanisms.
@@ -191,14 +195,22 @@ FAIL if any equivalence invariant is violated.
 ```
 □ Enforce optimized release builds only (debug assertions skew micro-architectural paths).
 
-□ Execution engine stabilization & warm-up convergence (JVM, V8, PyTorch, MLX, WebGL/WebGPU shaders): Warm up the execution
-  pipeline (run 5–10 iterations) before starting the timer to eliminate JIT compilation or trace overhead.
+□ Execution engine stabilization & warm-up convergence (JVM, V8, PyTorch, MLX, WebGL/WebGPU shaders):
+  Warm up the execution pipeline (e.g., compile shaders, trigger JIT trace compilation, or perform initial tensor 
+  evaluation passes) before starting the timer to eliminate compiler or trace generation overhead.
 □ Hardware-accelerated execution synchronization & pipeline flushing (GPU, CUDA, OpenCL, Metal, Vulkan):
-  Call explicit device/queue synchronization (e.g. mx.synchronize(), cudaDeviceSynchronize(),
-  command-buffer wait) before stopping the timer to measure actual execution time instead of CPU dispatch latency.
+  Call explicit device/queue synchronization (e.g., mx.synchronize(), cudaDeviceSynchronize(), or Metal 
+  commandBuffer.waitUntilCompleted()) before stopping the timer to capture real execution time instead of CPU dispatch latency.
 
-□ High-precision micro-benchmarking of the isolated function:
-  ≥ 10 iterations. Compute mean and standard deviation.
+□ LLM / Transformer-Specific Metrics:
+  - Profile and report the Prefill Phase (compute-bound matrix multiplications, KV cache allocation/ingestion) 
+    and the Decode Phase (memory-bandwidth bound token generation loops) separately.
+  - Measure Time to First Token (TTFT) for prefill, and Tokens Per Second (TPS) for decode.
+  - Track KV cache memory allocation efficiency and shape padding effects on GPU memory fragmentation.
+
+□ High-precision benchmarking:
+  - Lightweight functions: Run ≥ 10 runs or utilize statistical micro-benchmarking suites.
+  - Heavy ML/Inference runs: Measure sufficient tokens/runs (e.g., 5-10 sequences) to achieve standard deviation convergence.
   Validate: (old_mean − new_mean) / old_stddev > 2 → statistically significant optimization.
 
 □ End-to-end black-box benchmarking (if micro-benchmarks are inconclusive):
