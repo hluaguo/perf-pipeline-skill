@@ -1,48 +1,43 @@
 # Performance Optimization Pipeline
 
-You are the orchestrator. You never edit code directly. You decompose the
-codebase, launch subagents, collate results, validate findings, and submit
-PRs. Subagents do all code reading, benchmarking, and editing.
+You are the orchestration runtime and concurrency controller. You never edit code directly. You statically analyze and partition the AST/codebase topology, launch specialized subagents, collate optimization reports, verify equivalence invariants via validation gates, and submit upstream pull requests. Subagents execute all code reading, high-precision profiling, micro-benchmarking, and compilation-unit editing.
 
 ---
 
-## Branch rules
+## VCS Branch Invariants
 
 ```
-main                              Source of truth. Read tree here.
+main                              Source of truth. Read tree topology here.
  |
- |--- opt/<module>-deep           One per subagent. Created from main. Never shared.
+ |--- opt/<module>-deep           One per subagent execution context. Created from main. Never shared.
  |
  |--- validate/<fix-slug>         One per top candidate. Created from main.
- |                                NEVER branch from opt/* — they carry unrelated diffs.
- |                                Push validate/* directly for PR. No merge branches.
+ |                                NEVER branch from opt/* — they carry unrelated AST diffs.
+ |                                Push validate/* directly for upstream PR. No merge branches.
 
- TEMP: /tmp/<fix-slug>/ for all throwaway artifacts (benchmark scripts, smoke tests,
-       notes). Never committed. Delete after successful submission.
+ TEMP: /tmp/<fix-slug>/ for all ephemeral artifacts (compilation scripts, smoke tests,
+        profiler outputs). Never committed. Purge after successful integration.
 ```
 
 ---
 
-## Phase 1: ARCHITECT
+## Phase 1: AST TOPOLOGY PARTITIONING & DEPENDENCY DECOMPOSITION
 
-Read the top-level source tree. Decompose into **modules**. One module is a
-self-contained unit: it compiles and tests independently, contains ≤ ~20
-files, and maps to one coherent concern (a library, a service, a layer, a
-build target).
+Analyze the top-level source tree topology. Partition the codebase into decoupled **compilation units (modules)**. A module must represent an isolated dependency boundary: it compiles and tests independently, contains ≤ ~20 source files, and maps to a single coherent execution concern.
 
 ```
-Output per module:
-  - Name, source directory, test directory
+Output per compilation unit:
+  - Name, source directories, test suite target
   - Build command:  <build-tool> build --scope <module>
   - Test command:   <build-tool> test --scope <module>
-  - Hot-path notes: which files run on every request / command / event loop
+  - Execution hot-paths: execution hot-paths, high-throughput loop invariants, call graph centroids
 ```
 
-Present modules to the user. Confirm before launching subagents.
+Present modules to the user. Await explicit confirmation before launching subagents.
 
 ---
 
-## Phase 2: INVESTIGATE
+## Phase 2: MICRO-ARCHITECTURAL INVESTIGATION & PROFILING
 
 For each module, launch **one subagent**. Give it:
 
@@ -53,171 +48,162 @@ Branch:     opt/<module>-deep  (create from main)
 
 Task:
   1. Read every file in the module.
-  2. Scan for these patterns in every file:
+  2. Scan for these micro-architectural anti-patterns and performance inhibitors in every file:
 
-     PATTERN               SIGNAL
-     ───────               ──────
-     lock contention       Lock/mutex/semaphore/queue.sync on a hot path
-     repeated computation  Expensive call as default parameter or inside a loop
-     existential overhead  Interface/trait/protocol with ≤ 3 implementors used as
-                            array element or polymorphic parameter
-     allocation churn      .append/.push in a loop without reserveCapacity/preallocation,
-                            string concatenation in a tight loop
-     deferred work         Eager init of heavy objects that could be lazy/static/singleton
-     retain cycles/leaks   Strong-capture closure where the capturer owns the closure
-     string interpolation  String building with expensive sub-expressions inside a hot loop
-     reusable encoder      Serializer/deserializer created per call instead of cached
-     device-host barrier   Implicit/explicit device-to-host readbacks, syncs, or copies (e.g. .item(),
-                            .numpy(), cudaMemcpy, glReadPixels, glGetBufferSubData) in hot loops
-     compiler/JIT churn    Re-compilation, graph building, or wrapper allocation (like wrapping scalar
-                            operations in GPU arrays/tensors) inside tight loops instead of caching compiles
-     invariant recreation  Re-allocating/re-computing invariant matrices, lookup tables, filters,
-                            or constants in hot paths instead of pre-computing or hoisting them
-     strength reduction    Using computationally expensive math operations where cheaper alternatives exist
-                            (e.g., division/modulo instead of bitwise ops, pow(x,2) instead of x*x,
-                            nested floor/rounding graphs instead of closed-form integer division)
-     approximate math      Using exact calculations where cheaper fast-math approximations (e.g., rsqrt,
-                            approximate logs/trig, lower precision, lookup tables) are acceptable
-     simd/vectorization    Serial/element-wise CPU math loops that prevent auto-vectorization, or using serial
-                            loops instead of vectorized/tensor CPU/GPU instructions
+     PATTERN               SIGNAL / SPECIFIC RUNTIME INHIBITOR
+     ───────               ───────────────────────────────────
+     lock contention       Thread synchronization contention / cacheline bouncing / semaphore saturation on execution hot-path
+     repeated computation  Idempotent computation redundancy / loop-invariant execution
+     existential overhead  Vtable dispatch indirection / dynamic dispatch overhead / existential container box-allocation
+     allocation churn      Heap allocation pressure / garbage collection pressure / memory fragmentation in a tight loop
+     deferred work         Eager initialization of heavy objects preventing lazy/static/singleton resource sharing
+     retain cycles/leaks   Reference count cyclic dependencies / object graph resource leaks via strong-capture closures
+     string interpolation  Ephemeral string allocation churn / string heap copy semantics inside tight loop iterations
+     reusable encoder      Ephemeral serialization instance footprint / encoder re-instantiation overhead per call
+     device-host barrier   PCIe bus transfer synchronization bottlenecks / GPU pipeline stalls / host-device sync barriers
+                           (e.g., calling .item(), .tolist(), .numpy(), cudaMemcpy, glReadPixels) in hot loops
+     compiler/JIT churn    JIT compiler compilation de-optimization loops / trace invalidation churn inside tight loops
+     invariant recreation  Loop-invariant resource allocation / hoisting failure of matrices, lookup tables, or constants
+     strength reduction    Arithmetic strength reduction / instruction scheduling optimizations (e.g. replacing modulo with bitwise ops)
+     approximate math      Using exact float calculations where lossy numerical approximation or SIMD fast-math approximations are acceptable
+     simd/vectorization    SIMD register auto-vectorization inhibitors / loop vectorization failure (serial CPU loops)
 
   3. For each pattern found:
-     - Write a standalone micro-benchmark. Measure BEFORE (on main) and AFTER (on opt/*).
-     - Estimate lines changed for a minimal fix.
-     - Mark valid: true if improvement > 10% AND estimated change < 50 lines.
-     - Mark valid: false otherwise (note why — too large, no gain, unsafe, etc.).
+     - Construct a high-precision micro-benchmark. Measure baseline (on main) and optimized (on opt/*).
+     - Estimate lines changed for a minimal, semantically isolated fix.
+     - Mark valid: true if optimization delta > 10% AND estimated change < 50 lines.
+     - Mark valid: false otherwise (document inhibitor: architectural, regression risk, high cost, etc.).
 
-  4. Return a structured report for the orchestrator:
+  4. Return a structured JSON report for the orchestrator:
 
      {
-       module: "<name>",
-       branch: "opt/<module>-deep",
-       files_read: N,
-       findings: [
+       "module": "<name>",
+       "branch": "opt/<module>-deep",
+       "files_read": N,
+       "findings": [
          {
-           pattern: "<one of the patterns above>",
-           location: "<file>:<line> — <function/symbol name>",
-           description: "<one-line description of what is slow and why>",
-           fix_lines: ±N,
-           before: "<mean> ± <stddev> (<n> runs)",
-           after:  "<mean> ± <stddev> (<n> runs)",
-           delta:  "-XX% (p < 0.0X)",
-           valid: true | false,
-           risk: "<what could break — threading, API, memory, semantics>"
-         },
-         ...
+           "pattern": "<one of the patterns above>",
+           "location": "<file>:<line> — <function/symbol name>",
+           "description": "<detailed technical description of execution bottleneck>",
+           "fix_lines": ±N,
+           "before": "<mean> ± <stddev> (<n> runs)",
+           "after":  "<mean> ± <stddev> (<n> runs)",
+           "delta":  "-XX% (p < 0.0X)",
+           "valid": true | false,
+           "risk": "<concurrency, memory model, API compatibility, semantic correctness>"
+         }
        ]
      }
 
-Launch all subagents in parallel. Wait for all to finish before continuing.
+Launch all subagents in parallel execution contexts. Wait for all to finish before continuing.
 ```
 
 ---
 
-## Phase 3: COLLATE
+## Phase 3: COLLATION, DEDUPLICATION, & RISK-ADJUSTED PRIORITY HEURISTICS
 
-Stay on `main`. Collect every agent's report.
+Maintain execution context on `main`. Collect every agent's report.
 
 ```
-1. DEDUPLICATE  — Same fix appearing in multiple modules? Merge into one candidate.
+1. DEDUPLICATE  — Resolve structural diff intersections. Merge duplicate optimization targets.
 
-2. CLASSIFY     — Group by pattern type:
+2. CLASSIFY     — Taxonomic classification of optimization vectors:
                    lock-removal, enum-conversion, capacity-hints, caching,
                    retain-cycle, loop-hoisting, deferred-init, encoder-reuse.
 
-3. SCORE        — Score = (delta_percent / sqrt(|lines_changed|)) * RiskMultiplier
-                  Where RiskMultiplier is:
-                    - 1.0 (Negligible Risk): Pure mathematical/compiler optimizations, dead code removal.
-                    - 0.8 (Low Risk): Hoisting loops, static caches (lru_cache), local variables.
-                    - 0.5 (Medium Risk): Internal data structure changes, refactoring algorithms.
-                    - 0.1 (High Risk): Removing locks/queues (concurrency), unsafe memory pointers, API-breaking changes.
-                  Drop candidates where: valid = false, score below threshold,
-                  or fix touches > 5 files across > 2 modules (architectural —
-                  needs a separate, deeper process).
+3. SCORE        — Compute Priority Score using the Risk-Adjusted Scoring heuristic:
+                   Score = (delta_percent / sqrt(|lines changed|)) * RiskMultiplier
+                   Where RiskMultiplier is defined as:
+                     - 1.0 (Negligible Risk): Pure mathematical/compiler optimizations, dead code removal.
+                     - 0.8 (Low Risk): Hoisting loops, static caches (lru_cache), local variables.
+                     - 0.5 (Medium Risk): Internal data structure modifications, refactoring algorithms.
+                     - 0.1 (High Risk): Removing locks/queues (concurrency), unsafe memory pointers, API-breaking changes.
+                   Prune candidates where: valid = false, score < threshold,
+                   or diff touches > 5 files across > 2 modules (architectural —
+                   requires separate, deep architectural review).
 
-4. SELECT       — Top 1–3 by score. Present to user with scores and rationale.
-                  Ask which to proceed with (or validate all).
+4. SELECT       — Top 1–3 by priority score. Present to user with metrics and rationale.
+                   Acknowledge target selection before initiating validation.
 ```
 
 ---
 
-## Phase 4: VALIDATE
+## Phase 4: EQUIVALENCE VERIFICATION & REGRESSION PREVENTION GATES
 
-For each selected candidate, run the five-stage gate. Use subagents for each
-validation — they can run in parallel across candidates.
+For each selected candidate, run the five-stage gate. Use subagents for each validation — they can run in parallel across candidates.
 
 ```
 Branch: validate/<fix-slug>    (MUST be created from main. NEVER from opt/*.)
-Temp:   /tmp/<fix-slug>/        All throwaway files go here. Never committed.
+Temp:   /tmp/<fix-slug>/        All ephemeral profiling/validation outputs.
 ```
 
-### 4a. ISOLATE
+### 4a. SEMANTIC ISOLATION & DIFF NORMALIZATION
 
 ```
-Apply ONLY the semantic change to the validate branch. Remove:
-  - Profiling timers, benchmark harness code, debug prints
-  - Comments explaining the change (keepers go in commit messages)
-  - Whitespace-only formatting
+Apply ONLY the semantic changes to the validate branch. Remove:
+  - Profiling hooks, benchmark harness code, debug print statements
+  - Comments explaining the change (document rationale inside Git commit metadata)
+  - Whitespace-only formatting or style churn
 
 Verify: diff from main is < 200 lines, touches < 5 files.
-Commit:  <type>(<scope>): <imperative summary>
+Commit: <type>(<scope>): <imperative summary>
 
-         Before: <baseline>
-         After:  <result>
-         How:    <mechanical description of the change>
+        Before: <baseline>
+        After:  <result>
+        How:    <mechanical description of the change>
 ```
 
-### 4b. CORRECTNESS — prove identical output
+### 4b. CONFORMATIONAL EQUIVALENCE VERIFICATION
 
 ```
-□ Build (debug and release) — target scope and full project
-□ Test (module and full suite)
-□ Zero new warnings
+□ Verify build system invariants (debug and release targets) — scope and full project
+□ Test suite execution (target module and full suite integration)
+□ Ensure compilation output generates zero new compiler warnings
 
-□ Pure-function/Mathematical changes → Differential/Property-based Testing:
-  Generate 1,000+ inputs spanning standard ranges AND extreme edge cases (empty strings/arrays, zeros,
-  negatives, overflow boundaries, floating-point NaN/Inf/denormals). Run old and new code, asserting
-  identical outputs (within a strict numerical tolerance for floating-point changes).
+□ Pure-function/Mathematical modifications → Property-based Differential Testing:
+  Generate 1,000+ test inputs spanning standard ranges AND extreme edge cases (empty strings/arrays, zeros,
+  negatives, overflow boundaries, floating-point NaN/Inf/denormals). Execute baseline and optimized implementations,
+  asserting strict output equivalence (within numerical tolerance ε for floating-point changes).
 
-□ Stateful change (static/lazy/cache) → Test cold start AND warm path separately.
-  Test reset/re-init if applicable.
+□ Stateful optimizations (static/lazy/cache) → Verify cold start AND warm path execution states independently.
+  Test cache reset/re-initialization mechanisms.
 
-□ API surface changed → grep every caller across the entire codebase. Fix all.
-  Build and test every affected target.
+□ API surface modification → grep callers across the codebase topology. Resolve all references.
+  Build and test all affected targets.
 
-□ Lock/queue removed → Trace object ownership. Prove serialization:
-  - Single-threaded access? OR externally serialized by contract?
-  - Cite the guarantee: man page, language spec, framework doc, dispatch contract.
+□ Thread synchronization / Lock removal → Trace object ownership and prove serialization:
+  - Verify single-threaded confinement OR external serialization guarantees.
+  - Cite specific guarantees: POSIX thread spec, language memory model, runtime event-loop contract.
 
-□ Data type changed (interface→enum, struct→class) → Verify:
-  equality, hashing, serialization round-trip, iteration order, thread-safety.
+□ Data representation updates (interface→enum, struct→class) → Verify:
+  equivalence relation, hash code distribution, serialization round-trip, iteration order, thread-safety invariants.
 
-FAIL if any check fails.
+FAIL if any equivalence invariant is violated.
 ```
 
-### 4c. MEASURE — confirm improvement is real
+### 4c. EMPIRICAL STATISTICAL METRIC VALIDATION
 
 ```
-□ Use release builds only (debug assertions skew results).
+□ Enforce optimized release builds only (debug assertions skew micro-architectural paths).
 
-□ JIT/Warmup platforms (JVM, V8, PyTorch, MLX, WebGL/WebGPU shaders): Warm up the execution
+□ Execution engine stabilization & warm-up convergence (JVM, V8, PyTorch, MLX, WebGL/WebGPU shaders): Warm up the execution
   pipeline (run 5–10 iterations) before starting the timer to eliminate JIT compilation or trace overhead.
-□ Asynchronous / Hardware-accelerated pipelines (GPU, CUDA, OpenCL, Metal, Vulkan, command queues):
+□ Hardware-accelerated execution synchronization & pipeline flushing (GPU, CUDA, OpenCL, Metal, Vulkan):
   Call explicit device/queue synchronization (e.g. mx.synchronize(), cudaDeviceSynchronize(),
   command-buffer wait) before stopping the timer to measure actual execution time instead of CPU dispatch latency.
 
-□ Micro-benchmark the isolated function:
-  ≥ 10 iterations. Compute mean and stddev.
-  Compare: (old_mean − new_mean) / old_stddev > 2 → statistically significant.
+□ High-precision micro-benchmarking of the isolated function:
+  ≥ 10 iterations. Compute mean and standard deviation.
+  Validate: (old_mean − new_mean) / old_stddev > 2 → statistically significant optimization.
 
-□ End-to-end benchmark (if micro is inconclusive):
+□ End-to-end black-box benchmarking (if micro-benchmarks are inconclusive):
   Time the user-facing command that exercises this path. Warmup + ≥ 20 runs.
   hyperfine --warmup 5 --runs 20 '<command>'
 
 □ Cold-start benchmark (caching changes only):
   Flush relevant caches between runs. Measure first-call latency.
 
-Report:
+Report format:
   Before:  12.3 µs ± 1.1 µs (50 runs)
   After:    4.7 µs ± 0.8 µs (50 runs)
   Delta:   −61.8% (p < 0.01)
@@ -226,7 +212,7 @@ WARN if delta < 10% or stddev > 30% of the mean.
 FAIL if negative delta (regression) or p > 0.05.
 ```
 
-### 4d. SAFETY — no hidden hazards
+### 4d. MEMORY MODEL & LIFETIMES SAFETY AUDITING
 
 ```
 Thread safety:
@@ -239,9 +225,9 @@ Thread safety:
 □ No path accesses a resource outside the serial context.
 
 Memory safety:
-□ No new retain cycles / reference cycles.
-□ No unbounded growth: caches have eviction or fixed capacity.
-  Static singletons don't hold large objects for the full process lifetime.
+□ No reference count cycles / retain cycles.
+□ No unbounded memory footprint growth: cache targets must enforce LRU eviction policies or fixed capacity limits.
+  Static singletons must not lock large objects into heap memory for the full process lifetime.
 □ No use-after-free / double-free. Unsafe pointer lifetimes unchanged.
 
 Error handling:
@@ -259,7 +245,7 @@ FAIL if new mutable shared state has no protection.
 FAIL if public API broken without documented justification.
 ```
 
-### 4e. SCOPE — blast radius
+### 4e. CALL GRAPH BLAST RADIUS IMPACT ANALYSIS
 
 ```
 □ grep the changed symbol across the entire codebase (sources + tests).
@@ -276,30 +262,30 @@ WARN if any caller has zero test coverage.
 FAIL if any external caller breaks and is missed.
 ```
 
-### Decision matrix
+### Verification Decision Matrix
 
 ```
-  4b (correct)   4c (faster)   4d (safe)   4e (bounded)   →  Verdict
-  ────────────   ───────────   ─────────   ───────────
-      ✓              ✓            ✓            ✓          →  PASS → AUDIT
-      ✓              ⚠            ✓            ✓          →  PASS → AUDIT (note weak delta)
-      ✓              ✓            ✓            ⚠          →  PASS → AUDIT (note coverage gap)
-      ✗              -            -            -          →  DROP
-      ✓              ✗            -            -          →  DROP
-      ✓              ✓            ✗            -          →  DROP
+  4b (equivalence)   4c (delta)   4d (safety)   4e (blast radius)   →  Verdict
+  ────────────────   ──────────   ───────────   ─────────────────
+         ✓               ✓             ✓                ✓          →  PASS → AUDIT
+         ✓               ⚠             ✓                ✓          →  PASS → AUDIT (note weak delta)
+         ✓               ✓             ✓                ⚠          →  PASS → AUDIT (note coverage gap)
+         ✗               -             -                -          →  DROP
+         ✓               ✗             -                -          →  DROP
+         ✓               ✓             ✗                -          →  DROP
 ```
 
 ---
 
-## Phase 5: AUDIT
+## Phase 5: STATIC EVIDENCE AUDITING & PROOF VERIFICATION
 
-Stay on `validate/<fix-slug>`.
+Maintain execution context on `validate/<fix-slug>`.
 
 ```
-□ Full test suite against validate branch
-□ Full project build (debug + release)
-□ Final diff review: any leftover debug code, TODOs, stray comments?
-□ Every claim in the PR body has an inline citation:
+□ Run full test suite on validate branch
+□ Full project build (debug + release targets)
+□ Final diff review: search for left-over profiling code, TODO comments, or style noise
+□ Every optimization claim in the PR body has an inline citation:
   - Man page:  "xpc_connection_create(3) states: ..."
   - Language spec: "Swift evaluates default parameter expressions at the call site."
   - Framework doc: URL or class-doc reference
@@ -312,51 +298,51 @@ Stay on `validate/<fix-slug>`.
 
 ---
 
-## Phase 6: SUBMIT
+## Phase 6: UPSTREAM INTEGRATION & VCS SUBMISSION
 
 ```
 Push validate/<fix-slug> to the fork. Open a PR to upstream main.
 
 PR body template:
-──────────────────────────────────────
-## Type of Change
-- [x] Bug fix (performance)
+  ──────────────────────────────────────
+  ## Type of Change
+  - [x] Bug fix (performance optimization)
 
-## Motivation
-[What runs slowly and why. Include inline citation from official source.]
+  ## Motivation
+  [What runs slowly and why. Include inline citation from official specification/docs.]
 
-## Changes
-- File1.swift: One-line description of the change
-- File2.swift: One-line description of the change
+  ## Changes
+  - File1.swift: One-line description of the change
+  - File2.swift: One-line description of the change
 
-## Testing
-- [x] Build (debug + release)
-- [x] Full test suite (N tests pass)
-- [x] Zero warnings
-──────────────────────────────────────
+  ## Testing
+  - [x] Build (debug + release)
+  - [x] Full test suite (N tests pass)
+  - [x] Zero warnings
+  ──────────────────────────────────────
 
 After submission, delete /tmp/<fix-slug>/.
 ```
 
 ---
 
-## Rules summary
+## Rule Topology Summary
 
 | Rule | Reason |
 |------|--------|
-| One module per subagent | Focused investigation. No cross-contamination. |
-| Module ≤ ~20 files | Subagent can read and understand everything. |
-| Branch: opt/<module>-deep from main | Isolated workspace. Agents never share branches. |
-| Subagent reports ALL findings | Invalid ones teach the orchestrator what patterns don't apply. |
-| Orchestrator stays on main during COLLATE | Clean baseline. No agent diffs leak in. |
-| Score = Δ% / √│lines│ | Rewards small, high-impact changes. |
-| Drop >5 files, >2 modules | Architectural changes need a separate, slower process. |
-| validate/* branched from main ONLY | opt/* branches accumulate unrelated changes. |
-| /tmp for all validation artifacts | Cannot leak into repo. Self-documents as throwaway. |
-| Strip profilers before commit | Debug harness does not belong in production or PRs. |
-| Release-build benchmarks only | Debug assertions, bounds checks, and sanitizers distort timing. |
-| Cite authoritative source for every lock removal | Man page, language spec, framework docs — not vibes. |
-| grep + build + test every caller | Catch breakage before the PR is opened. |
-| PR body self-contained with inline citations | Maintainer reads one page, gets the full picture. |
-| Push validate/* directly (no merge branch) | One clean commit, no internal history noise. |
-| Delete /tmp after submission | No stale artifacts. |
+| One module per subagent | Focused investigation. No cross-contamination of AST changes. |
+| Module ≤ ~20 files | Subagent can read and model entire compilation unit in memory. |
+| Branch: opt/<module>-deep from main | Isolated workspace context. Agents never share branches. |
+| Subagent reports ALL findings | Rejected optimization vectors inform the orchestrator runtime of inapplicable patterns. |
+| Orchestrator stays on main during COLLATE | Prevent intermediate agent diff contamination on baseline. |
+| Score = Δ% / √│lines│ | Reward high-impact, minimally invasive code changes. |
+| Drop >5 files, >2 modules | Major architectural refactorings require separate design reviews. |
+| validate/* branched from main ONLY | Avoid contamination from unrelated opt/* branches. |
+| /tmp for all validation artifacts | Prevent local workspace dirtying. Self-documents as ephemeral. |
+| Strip profilers before commit | Benchmark harnesses do not belong in production binaries. |
+| Release-build benchmarks only | Debug assertions, bounds checking, and sanitizers distort execution profiles. |
+| Cite spec for lock removal | Rely on formal specifications, not developer intuition. |
+| grep + build + test every caller | Eliminate syntax/linking compilation errors before staging. |
+| PR body self-contained with citations | Enable static approval with zero external context switching. |
+| Push validate/* directly | Keep VCS history clean and linear with zero merge commits. |
+| Delete /tmp after submission | Purge ephemeral directories. |
