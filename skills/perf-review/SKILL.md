@@ -40,10 +40,10 @@ Ensure the optimized implementation behaves exactly like the baseline under all 
 * **Edge-case inputs**: Check if the optimization fails on degenerate inputs (empty lists, empty strings, extremely large arrays).
 * **Differential Verification**: Confirm that the author has run differential testing comparing outputs of the old vs. new code:
   - Lightweight functions: A/B testing with $\ge$ 1,000 inputs.
-  - Heavy ML/Inference workloads (e.g., PyTorch, MLX): Validate output tensor numerical equivalence (within tolerance ε) across representative input prompts and token sequence boundaries, rather than 1,000+ slow model runs.
-* **Deep Learning & LLM Invariants**:
-  - Assert logical equivalence of KV cache retention, mask computations, and token output distributions.
-  - Separately validate output parity for the Prefill Phase (context processing) and the Decode Phase (autoregressive generation loop).
+  - Heavy compute / complex inference workloads (e.g., database engines, compilers, neural networks): Validate output state and data representation equivalence across representative end-to-end integration pathways instead of 1,000+ slow runs.
+* **Phase-Specific Functional Invariants**:
+  - Assert logical equivalence across distinct execution phases (e.g., planning/compiling, caching, streaming, serialization).
+  - Verify that phase-specific optimization invariants (e.g., query AST parity, buffer allocation states) are preserved.
 
 ---
 
@@ -91,11 +91,11 @@ Critique the benchmarking process and statistics:
 * **Build Mode**: Ensure benchmarks were executed on optimized release builds (debug builds with assertions, sanitizers, or bounds checks distort timing analysis).
 * **Warmup**: Verify that warmup runs (e.g., compiling shaders, JIT trace compilation, or initial tensor evaluation passes) were executed before measurements began to allow execution engines or caches to warm up.
 * **Async Synchronization**: For asynchronous hardware execution (GPUs), verify that explicit device sync commands (e.g., `mx.synchronize()`, `cudaDeviceSynchronize()`, or Metal commandBuffer wait) were called before stopping the timer to measure real execution time instead of CPU dispatch latency.
-* **LLM / Transformer-Specific Metrics**:
-  - Verify that the Prefill Phase (prompt token ingestion, KV cache allocation) and the Decode Phase (token generation loops) were profiled and reported separately.
-  - Verify TTFT (Time to First Token) and TPS (Tokens Per Second) metrics are collected.
-  - Check for KV cache memory footprint stability and memory fragmentation concerns.
-* **Statistical Integrity**: Ensure the run size is sufficient to achieve standard deviation convergence (e.g., $\ge$ 10 iterations for lightweight functions, or 5-10 sequences for heavy inference runs) and that the performance improvement ($\Delta\%$) is statistically significant relative to the standard deviation ($\sigma$).
+* **Pipeline & Phase-Specific Metrics**:
+  - Verify that the compute-heavy initialization phase (e.g., query planning, compilation, prompt prefill) and the memory/streaming throughput phase (e.g., execution loops, serialization, token decoding) were profiled and reported separately.
+  - Verify Time-to-First-Result (latency) and Throughput/Bandwidth metrics are collected.
+  - Check for resource allocation stability, cache footprint (e.g., KV caches, connection pools), and memory fragmentation concerns.
+* **Statistical Integrity**: Ensure the run size is sufficient to achieve standard deviation convergence (e.g., $\ge$ 10 iterations for lightweight functions, or 5-10 full cycles for heavy infrastructure/pipeline runs) and that the performance improvement ($\Delta\%$) is statistically significant relative to the standard deviation ($\sigma$).
 
 ---
 

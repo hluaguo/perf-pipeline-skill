@@ -167,12 +167,11 @@ Commit: <type>(<scope>): <imperative summary>
 
 □ Pure-function/Mathematical modifications → Property-based Differential Testing:
   - Lightweight functions: Generate 1,000+ test inputs spanning standard ranges and extreme edge cases.
-  - Heavy ML/Inference workloads (e.g., PyTorch, MLX): Validate output tensor numerical equivalence (within tolerance ε)
-    across representative input prompts and token sequence boundaries, rather than 1,000+ slow model runs.
+  - Heavy compute / complex inference workloads (e.g., compilers, database engines, neural networks): Validate output state and data representation equivalence across representative end-to-end integration pathways instead of 1,000+ slow runs.
 
-□ Deep Learning / LLM Workloads → Architectural & Phase Equivalence:
-  - Assert logical equivalence of KV cache retention, mask computations, and token output distributions.
-  - Separately validate output parity for the Prefill Phase (context processing) and the Decode Phase (autoregressive generation loop).
+□ Phase-Specific Functional Invariants (e.g., Compilers, Databases, Stateful Streams):
+  - Assert logical equivalence across distinct execution phases (e.g., initialization, query planning, KV/buffer allocations, serialization loops).
+  - Verify that phase-specific optimization invariants (e.g., compiler parsing trees, database transaction state, network packet ordering) are preserved under optimization.
 
 □ Stateful optimizations (static/lazy/cache) → Verify cold start AND warm path execution states independently.
   Test cache reset/re-initialization mechanisms.
@@ -202,15 +201,14 @@ FAIL if any equivalence invariant is violated.
   Call explicit device/queue synchronization (e.g., mx.synchronize(), cudaDeviceSynchronize(), or Metal 
   commandBuffer.waitUntilCompleted()) before stopping the timer to capture real execution time instead of CPU dispatch latency.
 
-□ LLM / Transformer-Specific Metrics:
-  - Profile and report the Prefill Phase (compute-bound matrix multiplications, KV cache allocation/ingestion) 
-    and the Decode Phase (memory-bandwidth bound token generation loops) separately.
-  - Measure Time to First Token (TTFT) for prefill, and Tokens Per Second (TPS) for decode.
-  - Track KV cache memory allocation efficiency and shape padding effects on GPU memory fragmentation.
+□ Pipeline & Phase-Specific Profiling Metrics:
+  - Isolate and profile the CPU-bound/compute-heavy initialization phase (e.g., database query planning, compiler compilation, LLM prefill phase) from the I/O or memory-bandwidth-bound streaming/throughput phase (e.g., query execution loops, serialization, token decoding) separately.
+  - Measure Latency metrics (e.g., Time-to-First-Result, transaction start latency) vs Throughput metrics (e.g., operations/second, bandwidth, output rate).
+  - Profile resource allocation, memory footprint stability, and cache eviction/retention efficiency (e.g., KV cache, memory buffers, connection pools).
 
 □ High-precision benchmarking:
-  - Lightweight functions: Run ≥ 10 runs or utilize statistical micro-benchmarking suites.
-  - Heavy ML/Inference runs: Measure sufficient tokens/runs (e.g., 5-10 sequences) to achieve standard deviation convergence.
+  - Lightweight routines: Run ≥ 10 runs or utilize statistical micro-benchmarking suites.
+  - Heavy infrastructure/pipeline runs: Run a sufficient number of representative test suites or full execution cycles (e.g., 5-10 runs) to achieve standard deviation convergence.
   Validate: (old_mean − new_mean) / old_stddev > 2 → statistically significant optimization.
 
 □ End-to-end black-box benchmarking (if micro-benchmarks are inconclusive):
