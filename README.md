@@ -10,14 +10,24 @@ ARCHITECT ──> INVESTIGATE ──> COLLATE ──> VALIDATE ──> AUDIT & R
 
 ## Installation
 
-### Quick Install
-Run the interactive installer in your terminal:
+### Standard CLI Manager (Recommended)
+You can install these skills directly using the standard `skills` CLI manager:
+```bash
+# Install locally to your active project workspace (.agents/skills)
+npx skills add hluaguo/perf-pipeline-skill
+
+# Install globally to all your agent environments (Gemini, Claude, OpenCode, etc.)
+npx skills add hluaguo/perf-pipeline-skill -g
+```
+
+### Automated Script (via curl)
+Alternatively, run the interactive installer in your terminal:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hluaguo/perf-pipeline-skill/main/install.sh | bash
 ```
 
 ### Unattended / Scripted Install
-Specify options to bypass interactive prompts:
+Specify options to bypass interactive prompts when using the automated script:
 ```bash
 # Examples:
 curl -fsSL https://raw.githubusercontent.com/hluaguo/perf-pipeline-skill/main/install.sh | bash -s -- --gemini    # Install to Gemini only
