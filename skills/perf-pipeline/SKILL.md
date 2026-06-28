@@ -44,12 +44,13 @@ Present modules to the user. Await explicit confirmation before launching subage
 
 ## Phase 2: MICRO-ARCHITECTURAL INVESTIGATION & PROFILING
 
-For each module, launch **one subagent**. Give it:
+For each module, launch **one subagent** (equipped with the `find-doc` skill to look up official specs and contracts). Give it:
 
 ```
 Module:     <name>
 Files:      <list of every source file in the module>
 Branch:     opt/<module>-deep  (create from main)
+Skills:     find-doc  (MUST be loaded for specifications lookup)
 
 Task:
   1. Read every file in the module.
@@ -135,16 +136,25 @@ Maintain execution context on `main`. Collect every agent's report.
 
 ## Phase 4: EQUIVALENCE VERIFICATION & REGRESSION PREVENTION GATES
 
-For each selected optimization candidate, delegate validation to a specialized subagent equipped with the `perf-validator` skill.
+For each selected optimization candidate, delegate validation to a specialized subagent equipped with the **`perf-validator`** and **`find-doc`** skills.
 
-Launch subagents in parallel execution contexts across candidates. Ensure each subagent runs the full five-stage validation pipeline:
-1. **Semantic Isolation & Diff Normalization** (Gate 1)
-2. **Conformational Equivalence Verification** (Gate 2)
-3. **Empirical Statistical Metric Validation** (Gate 3)
-4. **Memory Model & Lifetimes Safety Auditing** (Gate 4)
-5. **Call Graph Blast Radius Impact Analysis** (Gate 5)
+Give the subagent the following instructions:
+```
+Candidate:  <fix-slug>
+Skills:     perf-validator, find-doc  (BOTH must be active for safety audits and metrics profiling)
 
-Each subagent must execute the validation protocol and output a structured validation report verifying the candidate's safety, correctness, and performance improvement metrics before proceeding.
+Task:
+  Execute the full five-stage validation pipeline:
+  1. Semantic Isolation & Diff Normalization (Gate 1)
+  2. Conformational Equivalence Verification (Gate 2)
+  3. Empirical Statistical Metric Validation (Gate 3)
+  4. Memory Model & Lifetimes Safety Auditing (Gate 4)
+  5. Call Graph Blast Radius Impact Analysis (Gate 5)
+
+  Locate and verify all systems contracts or thread safety claims using system 'man' pages or official specs via the 'find-doc' skill. Output a structured validation report verifying the candidate's safety, correctness, and performance delta.
+```
+
+Launch subagents in parallel execution contexts across candidates. Wait for their reports before proceeding to Phase 5.
 
 ---
 
