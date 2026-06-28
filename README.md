@@ -30,18 +30,49 @@ skills/
 The easiest way to install these skills is to run the automated installation script. 
 
 ### Quick Install (via curl)
-Run this command in your terminal to automatically clone and install the skills to your active agent environments (e.g. OpenCode, Claude Code, Gemini CLI, or locally to your active project workspace):
+Run this command in your terminal to launch the interactive installation menu:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hluaguo/perf-pipeline-skill/main/install.sh | bash
 ```
 
-### Manual Install
-If you prefer to install manually, clone the repository and run the installer locally:
+### Unattended / Non-Interactive Install
+If you are scripting or running in a CI/CD environment, you can pass arguments to the installer:
+```bash
+# Install globally to all detected agents (Gemini, Claude, OpenCode)
+curl -fsSL https://raw.githubusercontent.com/hluaguo/perf-pipeline-skill/main/install.sh | bash -s -- --global
+
+# Install globally to a specific agent only
+curl -fsSL https://raw.githubusercontent.com/hluaguo/perf-pipeline-skill/main/install.sh | bash -s -- --gemini
+curl -fsSL https://raw.githubusercontent.com/hluaguo/perf-pipeline-skill/main/install.sh | bash -s -- --claude
+curl -fsSL https://raw.githubusercontent.com/hluaguo/perf-pipeline-skill/main/install.sh | bash -s -- --opencode
+
+# Install locally to the current Git project (.agents/skills)
+curl -fsSL https://raw.githubusercontent.com/hluaguo/perf-pipeline-skill/main/install.sh | bash -s -- --project
+
+# Install to both global and local environments
+curl -fsSL https://raw.githubusercontent.com/hluaguo/perf-pipeline-skill/main/install.sh | bash -s -- --all
+
+# Install to a custom directory
+curl -fsSL https://raw.githubusercontent.com/hluaguo/perf-pipeline-skill/main/install.sh | bash -s -- --path /path/to/custom/skills
+```
+
+### Manual Local Install
+If you prefer to clone the repository and run the installer locally:
 ```bash
 git clone https://github.com/hluaguo/perf-pipeline-skill.git
 cd perf-pipeline-skill
 ./install.sh
 ```
+
+#### Available CLI Options:
+* `-g, --global`: Install to all detected global agent environments.
+* `--gemini`: Install globally to Gemini only.
+* `--claude`: Install globally to Claude Code only.
+* `--opencode`: Install globally to OpenCode only.
+* `-p, --project`: Install to the current project's local agent environment (`.agents/skills`).
+* `-a, --all`: Install to both global and project directories.
+* `-d, --path PATH`: Install to a custom directory path.
+* `-h, --help`: Show the installer usage instructions.
 
 ---
 
