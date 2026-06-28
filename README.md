@@ -27,18 +27,25 @@ npx skills add hluaguo/perf-pipeline-skill -g
 ### 1. `perf-pipeline`
 * **Triggers**: `optimize performance`, `profile the codebase`, `find bottlenecks`, `run a performance audit`
 * **Features**:
-  * Scans codebase for lock contention, allocation churn, and sync barriers.
-  * Ranks candidates using the Risk-Adjusted Scoring formula:
-    $$\text{Score} = \left(\frac{\Delta\%}{\sqrt{|\text{lines changed}|}}\right) \times \text{RiskMultiplier}$$
-  * Validates optimization candidates using automated differential testing with $\ge$ 1,000 inputs.
+  * Decomposes and partitions codebase dependencies into compilation units.
+  * Scans codebase for micro-architectural anti-patterns, JIT compilation churn, and synchronization barriers.
+  * Computes priority scores and coordinates subagents using a risk-adjusted priority heuristic.
 
-### 2. `perf-review`
+### 2. `perf-validator`
+* **Triggers**: `validate candidate`, `run correctness gate`, `execute microbenchmarks`, `verify performance fix`
+* **Features**:
+  * Normalizes changes and isolates semantic optimization diffs.
+  * Proves computational equivalence using property-based differential testing.
+  * Runs statistical profiling benchmarks isolating prefill/decode or latency/throughput phases.
+  * Performs memory model safety audits and blast radius call graph analyses.
+
+### 3. `perf-review`
 * **Triggers**: `review performance PR`, `audit optimization branch`, `validate merge safety`
 * **Features**:
   * Audits performance PRs for memory safety, concurrency locks, cache eviction, and GPU host-readback bottlenecks.
   * Reviews strength reductions, fast-math approximations, and compilation warmups.
 
-### 3. `find-doc`
+### 4. `find-doc`
 * **Triggers**: `locate specification`, `find documentation`, `check POSIX contract`, `retrieve standard reference`
 * **Features**:
   * Locates official specs, API manuals, and language memory model documents.
