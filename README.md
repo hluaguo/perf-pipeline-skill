@@ -38,6 +38,13 @@ npx skills add hluaguo/perf-pipeline-skill -g
   * Audits performance PRs for memory safety, concurrency locks, cache eviction, and GPU host-readback bottlenecks.
   * Reviews strength reductions, fast-math approximations, and compilation warmups.
 
+### 3. `find-doc`
+* **Triggers**: `locate specification`, `find documentation`, `check POSIX contract`, `retrieve standard reference`
+* **Features**:
+  * Locates official specs, API manuals, and language memory model documents.
+  * Details system manual (`man` page) lookup strategies and web search targets.
+  * Provides proof validation and citation standards to back safety claims with authoritative quotes.
+
 ---
 
 ## License

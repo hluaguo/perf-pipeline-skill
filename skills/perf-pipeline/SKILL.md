@@ -137,6 +137,12 @@ Maintain execution context on `main`. Collect every agent's report.
 
 For each selected candidate, run the five-stage gate. Use subagents for each validation — they can run in parallel across candidates.
 
+### Official Documentation Lookup Policy
+To guarantee safety and correctness, do not rely on pre-trained knowledge or assumptions. You must actively search for and inspect official documentation:
+- System `man` pages (e.g., `man pthread_mutex_lock`, `man 3 xpc`) to inspect operating system and library contracts.
+- Web search and URL reading (`search_web`, `read_url_content`) to retrieve official language specifications, database manuals, hardware reference guides, or framework SDK references.
+- Local custom documentation search commands (like `/ctx` or doc search tools) to locate project design specifications.
+
 ```
 Branch: validate/<fix-slug>    (MUST be created from main. NEVER from opt/*.)
 Temp:   /tmp/<fix-slug>/        All ephemeral profiling/validation outputs.
